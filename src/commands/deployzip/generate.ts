@@ -112,7 +112,7 @@ export default class DeployzipGenerate extends Command {
     const reasonFor = (key: string): string | undefined => {
       const type = key.slice(0, key.indexOf(':'));
       const name = key.slice(key.indexOf(':') + 1);
-      if (isManagedPackageComponent(type, name)) return 'managed package (installed in the org before deploy)';
+      if (isManagedPackageComponent(type, name)) return 'managed package';
       if (isIgnoredByRepo(type, name, sourceDirs[0])) return "kept out of git by the repo's .gitignore";
       return undefined;
     };
@@ -146,7 +146,7 @@ export default class DeployzipGenerate extends Command {
 
     this.log('');
     this.log(`${c.green('Done.')} ${c.bold(String(totals.inZip))} of ${totals.listed} components in the zip -> ${c.cyan(outputPath)} ${c.dim(`(${(statSync(target).size / 1024).toFixed(1)} KB)`)}`);
-    if (expected.length > 0) this.log(c.dim(`${expected.length} component(s) are not in the zip because their source is not in git (listed above). Managed-package ones must be installed in the target org first.`));
+    if (expected.length > 0) this.log(c.dim(`${expected.length} component(s) are not in the zip because their source is not in git (listed above).`));
     this.log('');
     this.log(table(headers, [...rows, totalRow], { rightAlign: [1, 2, 3, 4], separatorBefore: [rows.length] }).join('\n'));
     if (totals.inside > 0) {
