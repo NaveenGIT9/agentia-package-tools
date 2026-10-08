@@ -2,13 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Command, Flags } from '@oclif/core';
+import { packageFileFor, promotionFromManifestName, zipFileFor } from '../../lib/names.js';
+import { promotionNameFromBranch } from '../../lib/promotion.js';
+import { c, num, table } from '../../lib/render.js';
 import { buildDeploymentZip } from '../../lib/zip.js';
-
-const useColor = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-const paint = (code: string) => (s: string): string => (useColor ? `\u001b[${code}m${s}\u001b[0m` : s);
-const dim = paint('2');
-const green = paint('32');
-const yellow = paint('33');
 
 // Source folders from sfdx-project.json, else force-app.
 function defaultSourceDirs(): string[] {
@@ -37,12 +34,12 @@ export default class DeployzipGenerate extends Command {
     'deployment zip (package.xml + metadata). Only generates the zip: nothing is deployed and no org is contacted.';
   static examples = [
     '<%= config.bin %> deployzip generate',
-    '<%= config.bin %> deployzip generate -x manifest/package.xml -f deployment.zip',
+    '<%= config.bin %> deployzip generate -x manifest/package-P34277.xml -f deployment-P34277.zip',
     '<%= config.bin %> deployzip generate -x C:/temp/package.xml --allow-missing',
   ];
   static flags = {
-    manifest: Flags.string({ char: 'x', default: 'manifest/package.xml', description: 'package.xml to build the zip from (any path)' }),
-    output: Flags.string({ char: 'f', default: 'deployment.zip', description: 'Where to write the zip' }),
+    manifest: Flags.string({ char: 'x', description: 'package.xml to build the zip from, any path (default: manifest/package-<promotion>.xml for the checked-out promotion branch, else manifest/package.xml)' }),
+    output: Flags.string({ char: 'f', description: 'Where to write the zip (default: deployment-<promotion>.zip, for example deployment-P34277.zip)' }),
     'source-dir': Flags.string({ char: 'd', multiple: true, description: 'Source folder(s) to read from (default: packageDirectories of sfdx-project.json, else force-app)' }),
     'allow-missing': Flags.boolean({ description: 'Write the zip even if some components in package.xml have no source in this checkout' }),
   };
@@ -50,8 +47,16 @@ export default class DeployzipGenerate extends Command {
   async run(): Promise<void> {
     const { flags } = await this.parse(DeployzipGenerate);
 
-    const manifest = resolve(process.cwd(), flags.manifest);
+    // Which package.xml: the one given, else the one "package generate" wrote for this promotion branch, else manifest/package.xml.
+    const branchPromotion = promotionNameFromBranch();
+    const candidates = [...(branchPromotion ? [packageFileFor(branchPromotion)] : []), 'manifest/package.xml'];
+    const manifestPath = flags.manifest ?? candidates.find((cand) => existsSync(resolve(process.cwd(), cand)));
+    if (!manifestPath) this.error(`No package.xml given and none found (looked for ${candidates.join(', ')}). Run "agentia package generate" first, or pass --manifest <path>.`, { exit: 1 });
+    const manifest = resolve(process.cwd(), manifestPath);
     if (!existsSync(manifest)) this.error(`package.xml not found: ${manifest}`, { exit: 1 });
+    // The zip is named after the promotion in the package.xml's name, else after the checked-out promotion branch.
+    const outputPath = flags.output ?? zipFileFor(promotionFromManifestName(manifestPath) ?? branchPromotion);
+
     const sourceDirs = (flags['source-dir']?.length ? flags['source-dir'] : defaultSourceDirs()).map((d) => resolve(process.cwd(), d));
     const missingDirs = sourceDirs.filter((d) => !existsSync(d));
     if (missingDirs.length > 0) this.error(`Source folder not found: ${missingDirs.join(', ')}. Run this from the repo root, or pass --source-dir.`, { exit: 1 });
@@ -59,46 +64,65 @@ export default class DeployzipGenerate extends Command {
     // The zip is made from the files on disk, so say when they are not what the remote branch has.
     const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
     if (branch.ok) {
-      this.log(dim(`Branch ${branch.out} | manifest ${flags.manifest}`));
+      this.log(c.dim(`Branch ${branch.out} | manifest ${manifestPath}`));
       const behind = git(['rev-list', '--left-right', '--count', 'HEAD...@{u}']);
       const m = /^(\d+)\s+(\d+)$/.exec(behind.out);
       if (behind.ok && m && Number(m[2]) > 0) {
-        this.log(yellow(`Your branch is ${m[2]} commit(s) behind its remote (as of your last fetch). Run "git pull" first if the zip should include them.`));
+        this.log(c.yellow(`Your branch is ${m[2]} commit(s) behind its remote (as of your last fetch). Run "git pull" first if the zip should include them.`));
       }
       const dirty = git(['status', '--porcelain', '--', ...sourceDirs]);
       if (dirty.ok && dirty.out) {
-        this.log(yellow(`${dirty.out.split('\n').length} uncommitted change(s) in the source folders; the zip uses your working files.`));
+        this.log(c.yellow(`${dirty.out.split('\n').length} uncommitted change(s) in the source folders; the zip uses your working files.`));
       }
     }
 
     const build = await buildDeploymentZip(manifest, sourceDirs).catch((err: unknown) => this.error(err instanceof Error ? err.message : String(err), { exit: 1 }));
 
+    // Per type: what package.xml lists, what is in the zip, and what has no source.
+    const missingByType = new Map<string, number>();
+    for (const key of build.missing) {
+      const type = key.slice(0, key.indexOf(':'));
+      missingByType.set(type, (missingByType.get(type) ?? 0) + 1);
+    }
+    const types = [...new Set([...build.packed.keys(), ...missingByType.keys()])].sort((a, b) => a.localeCompare(b));
+    const totals = { listed: 0, inZip: 0, inside: 0, missing: 0 };
+    const rows = types.map((type) => {
+      const packed = build.packed.get(type) ?? { total: 0, insideParent: 0 };
+      const missing = missingByType.get(type) ?? 0;
+      totals.listed += packed.total + missing;
+      totals.inZip += packed.total;
+      totals.inside += packed.insideParent;
+      totals.missing += missing;
+      return [type, String(packed.total + missing), String(packed.total), num(packed.insideParent), num(missing, c.red)];
+    });
+    const totalRow = [c.bold('Total'), c.bold(String(totals.listed)), c.bold(String(totals.inZip)), num(totals.inside), num(totals.missing, c.red)];
+    const headers = ['Type', 'In package.xml', 'In the zip', 'inside their object', 'No source'];
+
     if (build.missing.length > 0) {
-      this.log(yellow(`${build.missing.length} component(s) in package.xml have no source in this checkout:`));
-      for (const key of build.missing.slice(0, 30)) this.log(`  ${key}`);
-      if (build.missing.length > 30) this.log(`  ... and ${build.missing.length - 30} more`);
+      this.log('');
+      this.log(c.yellow(`${build.missing.length} component(s) in package.xml have no source in this checkout:`));
+      const shown = build.missing.slice(0, 30).map((key) => [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]);
+      this.log(table(['Type', 'Name'], shown).join('\n'));
+      if (build.missing.length > shown.length) this.log(c.dim(`... and ${build.missing.length - shown.length} more`));
       if (!flags['allow-missing']) {
-        this.log(dim('Check out the promotion branch (and pull), or use --allow-missing to build the zip without them.'));
+        this.log(c.dim('Check out the promotion branch (and pull), or use --allow-missing to build the zip without them.'));
+        this.log('');
+        this.log(table(headers, [...rows, totalRow], { rightAlign: [1, 2, 3, 4], separatorBefore: [rows.length] }).join('\n'));
         this.error('Zip not written.', { exit: 1 });
       }
     }
 
-    const target = resolve(process.cwd(), flags.output);
+    const target = resolve(process.cwd(), outputPath);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, build.zip);
 
-    const count = [...build.packed.values()].reduce((a, b) => a + b.total, 0);
-    this.log(`${green('Done.')} ${count} component${count === 1 ? '' : 's'} in ${build.packed.size} type${build.packed.size === 1 ? '' : 's'} -> ${flags.output} (${(statSync(target).size / 1024).toFixed(1)} KB)`);
-    const width = Math.max(...[...build.packed.keys()].map((t) => t.length));
-    let inside = 0;
-    for (const [type, n] of [...build.packed].sort(([a], [b]) => a.localeCompare(b))) {
-      inside += n.insideParent;
-      const note = n.insideParent > 0 ? dim(`  (${n.insideParent} of them inside their object's file)`) : '';
-      this.log(`  ${type.padEnd(width)}  ${n.total}${note}`);
+    this.log('');
+    this.log(`${c.green('Done.')} ${c.bold(String(totals.inZip))} of ${totals.listed} components in the zip -> ${c.cyan(outputPath)} ${c.dim(`(${(statSync(target).size / 1024).toFixed(1)} KB)`)}`);
+    this.log('');
+    this.log(table(headers, [...rows, totalRow], { rightAlign: [1, 2, 3, 4], separatorBefore: [rows.length] }).join('\n'));
+    if (totals.inside > 0) {
+      this.log(c.dim('"inside their object": listed next to their whole object, so they are part of that object\'s file in the zip, not files of their own.'));
     }
-    if (inside > 0) {
-      this.log(dim('A component listed next to its whole object is part of that object\'s file in the zip, not a file of its own. The counts above match package.xml.'));
-    }
-    this.log(dim('Zip generated only. Nothing was deployed.'));
+    this.log(c.dim('Zip generated only. Nothing was deployed.'));
   }
 }

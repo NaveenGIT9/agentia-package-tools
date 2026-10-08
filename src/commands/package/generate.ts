@@ -1,15 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Command, Flags } from '@oclif/core';
+import { packageFileFor } from '../../lib/names.js';
 import { connect, resolveOrg } from '../../lib/org.js';
 import { buildPackageXml, selectComponents } from '../../lib/packageXml.js';
 import { fetchPromotionFiles, promotionNameFromBranch } from '../../lib/promotion.js';
-
-const useColor = Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-const paint = (code: string) => (s: string): string => (useColor ? `\u001b[${code}m${s}\u001b[0m` : s);
-const dim = paint('2');
-const green = paint('32');
-const yellow = paint('33');
+import { c, num, table } from '../../lib/render.js';
 
 // API version for package.xml: the project's sourceApiVersion when there is one, else 67.0 (this org's version).
 function defaultApiVersion(): string {
@@ -40,7 +36,7 @@ export default class PackageGenerate extends Command {
   static flags = {
     promotion: Flags.string({ char: 'p', description: 'Promotion name, e.g. P34231 (default: taken from the checked-out branch promotion/<name>)' }),
     'target-org': Flags.string({ char: 'o', description: 'Copado org alias or username (default: sf target-org)' }),
-    output: Flags.string({ char: 'f', default: 'manifest/package.xml', description: 'Where to write package.xml' }),
+    output: Flags.string({ char: 'f', description: 'Where to write package.xml (default: manifest/package-<promotion>.xml, for example manifest/package-P34277.xml)' }),
     'include-ignored': Flags.boolean({ description: 'Keep components that are listed in "Ignored changes" (they are left out by default)' }),
     'api-version': Flags.string({ description: 'API version in package.xml (default: sourceApiVersion from sfdx-project.json, else 67.0)' }),
   };
@@ -54,7 +50,7 @@ export default class PackageGenerate extends Command {
     }
 
     const org = resolveOrg(flags['target-org']);
-    this.log(dim(`Promotion ${name} | org ${org}`));
+    this.log(c.dim(`Promotion ${name} | org ${org}`));
 
     const conn = await connect(org);
     const files = await fetchPromotionFiles(conn, name).catch((err: unknown) => this.error(err instanceof Error ? err.message : String(err), { exit: 1 }));
@@ -66,42 +62,67 @@ export default class PackageGenerate extends Command {
     }
 
     const selection = selectComponents(files.changes, files.ignored, !flags['include-ignored']);
+    const skippedCount = Object.values(selection.skippedByAction).reduce((a, b) => a + b, 0);
     if (selection.members.size === 0) {
       this.error(
-        `No components left for package.xml (${selection.total} in the promotion, ${selection.ignored} ignored, ${Object.values(selection.skippedByAction).reduce((a, b) => a + b, 0)} skipped by action).`,
+        `No components left for package.xml (${selection.total} in the promotion, ${selection.ignored} ignored, ${skippedCount} skipped by action, ${selection.nonMetadata.length} not Salesforce metadata).`,
         { exit: 1 },
       );
     }
 
     const apiVersion = flags['api-version'] ?? defaultApiVersion();
-    const target = resolve(process.cwd(), flags.output);
+    const outputPath = flags.output ?? packageFileFor(files.promotion.name);
+    const target = resolve(process.cwd(), outputPath);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, buildPackageXml(selection.members, apiVersion), 'utf8');
 
-    this.log(`${green('Done.')} ${selection.included} component${selection.included === 1 ? '' : 's'} in ${selection.members.size} type${selection.members.size === 1 ? '' : 's'} -> ${flags.output}`);
-    const width = Math.max(...[...selection.members.keys()].map((t) => t.length));
-    for (const [type, members] of selection.members) this.log(`  ${type.padEnd(width)}  ${members.length}`);
+    const status = files.promotion.status ? `  |  status: ${files.promotion.status}` : '';
+    this.log('');
+    this.log(`${c.green('Done.')} ${c.bold(`Promotion ${files.promotion.name}`)}${c.dim(status)}`);
+    this.log(`package.xml -> ${c.cyan(outputPath)}`);
 
-    const status = files.promotion.status ? ` (status: ${files.promotion.status})` : '';
-    this.log(dim(`Promotion ${files.promotion.name}${status}: ${selection.total} component${selection.total === 1 ? '' : 's'} in the file.`));
-    if (!files.ignored) this.log(dim('No "Ignored changes" file on this promotion.'));
-    else if (flags['include-ignored']) this.log(dim('Ignored changes were kept (--include-ignored).'));
-    else {
-      this.log(dim(`Ignored (left out): ${selection.ignored}`));
+    // How the promotion's components add up to what is in package.xml.
+    this.log('');
+    this.log(c.bold('Summary'));
+    this.log(
+      table(
+        ['', 'Components'],
+        [
+          ['In the promotion file', String(selection.total)],
+          ['Included in package.xml', num(selection.included, c.green)],
+          ['Merged: listed more than once', num(selection.duplicates)],
+          [flags['include-ignored'] ? 'Ignored changes (kept: --include-ignored)' : 'Left out: ignored changes', num(selection.ignored, c.yellow)],
+          ['Left out: skipped by action', num(skippedCount, c.yellow)],
+          ['Left out: not Salesforce metadata', num(selection.nonMetadata.length, c.yellow)],
+        ],
+        { rightAlign: [1], separatorBefore: [1] },
+      ).join('\n'),
+    );
+    if (!files.ignored) this.log(c.dim('No "Ignored changes" file on this promotion.'));
+
+    this.log('');
+    this.log(c.bold('In package.xml'));
+    const typeRows = [...selection.members].map(([type, members]) => [type, String(members.length)]);
+    this.log(table(['Type', 'Components'], [...typeRows, ['Total', c.bold(String(selection.included))]], { rightAlign: [1], separatorBefore: [typeRows.length] }).join('\n'));
+
+    if (selection.ignoredComponents.length > 0 && !flags['include-ignored']) {
+      this.log('');
+      this.log(c.bold('Left out: ignored changes'));
       const shown = selection.ignoredComponents.slice(0, 50);
-      const typeWidth = Math.max(0, ...shown.map((i) => i.type.length));
-      for (const i of shown) this.log(yellow(`  ${i.type.padEnd(typeWidth)}  ${i.name}`) + (i.story ? dim(`  (${i.story})`) : ''));
-      if (selection.ignoredComponents.length > shown.length) this.log(dim(`  ... and ${selection.ignoredComponents.length - shown.length} more`));
+      this.log(table(['Type', 'Name', 'Story'], shown.map((i) => [i.type, c.yellow(i.name), i.story || c.dim('-')])).join('\n'));
+      if (selection.ignoredComponents.length > shown.length) this.log(c.dim(`... and ${selection.ignoredComponents.length - shown.length} more`));
     }
 
-    if (selection.duplicates > 0) this.log(dim(`Listed more than once, merged: ${selection.duplicates}`));
-
-    const skipped = Object.entries(selection.skippedByAction);
-    if (skipped.length > 0) {
-      this.log(yellow(`Skipped by action: ${skipped.map(([action, n]) => `${n} ${action}`).join(', ')}`));
+    if (skippedCount > 0) {
+      this.log('');
+      this.log(c.bold('Left out: skipped by action'));
+      this.log(table(['Action', 'Components'], Object.entries(selection.skippedByAction).map(([action, n]) => [action, String(n)]), { rightAlign: [1] }).join('\n'));
     }
+
     if (selection.nonMetadata.length > 0) {
-      this.log(yellow(`Left out, not Salesforce metadata (category Other): ${selection.nonMetadata.join(', ')}`));
+      this.log('');
+      this.log(c.bold('Left out: not Salesforce metadata (category Other)'));
+      this.log(table(['Type', 'Name'], selection.nonMetadata.map((k) => [k.split(':')[0], k.slice(k.indexOf(':') + 1)])).join('\n'));
     }
   }
 }
