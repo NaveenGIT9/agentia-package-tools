@@ -87,10 +87,18 @@ export default class DeployzipGenerate extends Command {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, build.zip);
 
-    const count = [...build.packed.values()].reduce((a, b) => a + b, 0);
+    const count = [...build.packed.values()].reduce((a, b) => a + b.total, 0);
     this.log(`${green('Done.')} ${count} component${count === 1 ? '' : 's'} in ${build.packed.size} type${build.packed.size === 1 ? '' : 's'} -> ${flags.output} (${(statSync(target).size / 1024).toFixed(1)} KB)`);
     const width = Math.max(...[...build.packed.keys()].map((t) => t.length));
-    for (const [type, n] of [...build.packed].sort(([a], [b]) => a.localeCompare(b))) this.log(`  ${type.padEnd(width)}  ${n}`);
+    let inside = 0;
+    for (const [type, n] of [...build.packed].sort(([a], [b]) => a.localeCompare(b))) {
+      inside += n.insideParent;
+      const note = n.insideParent > 0 ? dim(`  (${n.insideParent} of them inside their object's file)`) : '';
+      this.log(`  ${type.padEnd(width)}  ${n.total}${note}`);
+    }
+    if (inside > 0) {
+      this.log(dim('A component listed next to its whole object is part of that object\'s file in the zip, not a file of its own. The counts above match package.xml.'));
+    }
     this.log(dim('Zip generated only. Nothing was deployed.'));
   }
 }

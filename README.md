@@ -59,6 +59,7 @@ agentia deployzip generate -x C:/temp/package.xml -f out/deployment.zip
 Packs the source files of every component in the package.xml, from your local checkout, into a Metadata API deployment zip.
 
 - If a component in the package.xml has no source in your checkout, the command lists it and does **not** write the zip. Check out the promotion branch (and `git pull`), or pass `--allow-missing`; the zip's own `package.xml` then lists only what is in it.
+- The per-type counts match the `package.xml`, so you can compare them with the promotion. A field (or other child) listed next to its whole object is part of that object's file in the zip, not a file of its own; the count says "N of them inside their object's file".
 - It warns when your branch is behind its remote, or has uncommitted changes in the source folders, because the zip is built from your files on disk.
 
 | Flag | Meaning |
