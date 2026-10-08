@@ -1,0 +1,34 @@
+{
+  "name": "agentia-package-tools",
+  "displayName": "Agentia Package Tools",
+  "description": "Installs the agentia commands that generate package.xml and a deployment zip for a Copado promotion",
+  "version": "0.1.0",
+  "publisher": "NaveenBonthu9",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentiaPackage.install",
+        "title": "Generate Package XML and Deploy ZIP - Install Agentia Commands"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@types/node": "^18",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3",
+    "typescript": "^5"
+  }
+}
