@@ -38,8 +38,8 @@ export default class DeployzipGenerate extends Command {
     '<%= config.bin %> deployzip generate -x C:/temp/package.xml --allow-missing',
   ];
   static flags = {
-    manifest: Flags.string({ char: 'x', description: 'package.xml to build the zip from, any path (default: manifest/package-<promotion>.xml for the checked-out promotion branch, else manifest/package.xml)' }),
-    output: Flags.string({ char: 'f', description: 'Where to write the zip (default: deployment-<promotion>.zip, for example deployment-P34277.zip)' }),
+    manifest: Flags.string({ char: 'x', description: 'package.xml to build the zip from, any path (default: package-<promotion>.xml in your Downloads folder for the checked-out promotion branch, else manifest/package.xml)' }),
+    output: Flags.string({ char: 'f', description: 'Where to write the zip (default: your Downloads folder, as deployment-<promotion>.zip, for example deployment-P34277.zip)' }),
     'source-dir': Flags.string({ char: 'd', multiple: true, description: 'Source folder(s) to read from (default: packageDirectories of sfdx-project.json, else force-app)' }),
     'allow-missing': Flags.boolean({ description: 'Write the zip even if some components in package.xml have no source in this checkout' }),
   };
@@ -47,9 +47,13 @@ export default class DeployzipGenerate extends Command {
   async run(): Promise<void> {
     const { flags } = await this.parse(DeployzipGenerate);
 
-    // Which package.xml: the one given, else the one "package generate" wrote for this promotion branch, else manifest/package.xml.
+    // Which package.xml: the one given, else the one "package generate" wrote for this promotion branch (Downloads), else
+    // an older copy in the repo's manifest folder.
     const branchPromotion = promotionNameFromBranch();
-    const candidates = [...(branchPromotion ? [packageFileFor(branchPromotion)] : []), 'manifest/package.xml'];
+    const candidates = [
+      ...(branchPromotion ? [packageFileFor(branchPromotion), `manifest/package-${branchPromotion}.xml`] : []),
+      'manifest/package.xml',
+    ];
     const manifestPath = flags.manifest ?? candidates.find((cand) => existsSync(resolve(process.cwd(), cand)));
     if (!manifestPath) this.error(`No package.xml given and none found (looked for ${candidates.join(', ')}). Run "agentia package generate" first, or pass --manifest <path>.`, { exit: 1 });
     const manifest = resolve(process.cwd(), manifestPath);

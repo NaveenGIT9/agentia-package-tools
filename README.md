@@ -29,7 +29,7 @@ agentia package generate
 1. Reads the promotion name from the checked-out branch (`promotion/P34231` -> `P34231`), or from `-p P34231`.
 2. Finds that promotion in your default `sf` org (the Copado org), or the org from `-o <alias>`.
 3. Reads the promotion's `Copado Promotion changes` file and its `Ignored changes` file, if there is one.
-4. Writes `manifest/package-P34231.xml` (the promotion name is in the file name; change with `-f <path>`).
+4. Writes `package-P34231.xml` to your **Downloads** folder (the promotion name is in the file name, and nothing is added to your repo; change with `-f <path>`).
 
 What goes into `package.xml`:
 
@@ -45,18 +45,18 @@ Everything that is left out is counted in the summary the command prints.
 |---|---|
 | `-p, --promotion` | Promotion name (default: from the branch) |
 | `-o, --target-org` | Copado org alias or username (default: sf target-org) |
-| `-f, --output` | Output path (default `manifest/package-<promotion>.xml`) |
+| `-f, --output` | Output path (default: `package-<promotion>.xml` in your Downloads folder) |
 | `--include-ignored` | Keep components listed in Ignored changes |
 | `--api-version` | API version in the file (default: `sourceApiVersion` of `sfdx-project.json`, else 67.0) |
 
 ## `agentia deployzip generate`
 
 ```
-agentia deployzip generate                      # on promotion/P34231: manifest/package-P34231.xml -> deployment-P34231.zip
+agentia deployzip generate                      # on promotion/P34231: Downloads/package-P34231.xml -> Downloads/deployment-P34231.zip
 agentia deployzip generate -x C:/temp/package.xml -f out/deployment.zip
 ```
 
-With no flags it uses the `package.xml` that `package generate` wrote for the checked-out promotion branch (else `manifest/package.xml`). The zip is named after the promotion: from the package.xml's file name (`package-P34231.xml`), else from the branch, else `deployment.zip`.
+With no flags it uses the `package.xml` that `package generate` wrote to your Downloads folder for the checked-out promotion branch (else `manifest/package-<promotion>.xml` or `manifest/package.xml` in the repo). The zip goes to Downloads too and is named after the promotion: from the package.xml's file name (`package-P34231.xml`), else from the branch, else `deployment.zip`. A file with the same name is overwritten.
 
 Packs the source files of every component in the package.xml, from your local checkout, into a Metadata API deployment zip.
 
@@ -67,7 +67,7 @@ Packs the source files of every component in the package.xml, from your local ch
 | Flag | Meaning |
 |---|---|
 | `-x, --manifest` | package.xml to use, any path (default: see above) |
-| `-f, --output` | Zip path (default `deployment-<promotion>.zip`) |
+| `-f, --output` | Zip path (default: `deployment-<promotion>.zip` in your Downloads folder) |
 | `-d, --source-dir` | Source folder(s) (default: `packageDirectories` of `sfdx-project.json`, else `force-app`) |
 | `--allow-missing` | Write the zip even if some components have no source |
 

@@ -36,7 +36,7 @@ export default class PackageGenerate extends Command {
   static flags = {
     promotion: Flags.string({ char: 'p', description: 'Promotion name, e.g. P34231 (default: taken from the checked-out branch promotion/<name>)' }),
     'target-org': Flags.string({ char: 'o', description: 'Copado org alias or username (default: sf target-org)' }),
-    output: Flags.string({ char: 'f', description: 'Where to write package.xml (default: manifest/package-<promotion>.xml, for example manifest/package-P34277.xml)' }),
+    output: Flags.string({ char: 'f', description: 'Where to write package.xml (default: your Downloads folder, as package-<promotion>.xml, for example package-P34277.xml)' }),
     'include-ignored': Flags.boolean({ description: 'Keep components that are listed in "Ignored changes" (they are left out by default)' }),
     'api-version': Flags.string({ description: 'API version in package.xml (default: sourceApiVersion from sfdx-project.json, else 67.0)' }),
   };
