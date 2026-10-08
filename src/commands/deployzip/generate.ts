@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Command, Flags } from '@oclif/core';
+import { isIgnoredByRepo } from '../../lib/gitignore.js';
+import { isManagedPackageComponent } from '../../lib/managed.js';
 import { packageFileFor, promotionFromManifestName, zipFileFor } from '../../lib/names.js';
 import { promotionNameFromBranch } from '../../lib/promotion.js';
 import { c, num, table } from '../../lib/render.js';
@@ -100,14 +102,36 @@ export default class DeployzipGenerate extends Command {
       return [type, String(packed.total + missing), String(packed.total), num(packed.insideParent), num(missing, c.red)];
     });
     const totalRow = [c.bold('Total'), c.bold(String(totals.listed)), c.bold(String(totals.inZip)), num(totals.inside), num(totals.missing, c.red)];
-    const headers = ['Type', 'In package.xml', 'In the zip', 'inside their object', 'No source'];
+    const headers = ['Type', 'In package.xml', 'In the zip', 'inside their object', 'Not in the zip'];
 
-    if (build.missing.length > 0) {
+    // Some components are expected to have no source: ones this repo's .gitignore keeps out of git, and components of an
+    // installed managed package (the package is installed in the target org before the deployment). They are left out of
+    // the zip and listed, but do not block it. Anything else without source is a real gap: the file is not on the
+    // checked-out branch, so that blocks unless --allow-missing.
+    const toRow = (key: string): string[] => [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+    const reasonFor = (key: string): string | undefined => {
+      const type = key.slice(0, key.indexOf(':'));
+      const name = key.slice(key.indexOf(':') + 1);
+      if (isManagedPackageComponent(type, name)) return 'managed package (installed in the org before deploy)';
+      if (isIgnoredByRepo(type, name, sourceDirs[0])) return "kept out of git by the repo's .gitignore";
+      return undefined;
+    };
+    const expected = build.missing.filter((key) => reasonFor(key) !== undefined);
+    const noSource = build.missing.filter((key) => !expected.includes(key));
+
+    if (expected.length > 0) {
       this.log('');
-      this.log(c.yellow(`${build.missing.length} component(s) in package.xml have no source in this checkout:`));
-      const shown = build.missing.slice(0, 30).map((key) => [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)]);
+      this.log(c.yellow(`${expected.length} component(s) left out of the zip, as expected (no source to pack):`));
+      this.log(table(['Type', 'Name', 'Why'], expected.slice(0, 30).map((key) => [...toRow(key), reasonFor(key) ?? ''])).join('\n'));
+      if (expected.length > 30) this.log(c.dim(`... and ${expected.length - 30} more`));
+    }
+
+    if (noSource.length > 0) {
+      this.log('');
+      this.log(c.yellow(`${noSource.length} component(s) in package.xml have no source in this checkout:`));
+      const shown = noSource.slice(0, 30).map(toRow);
       this.log(table(['Type', 'Name'], shown).join('\n'));
-      if (build.missing.length > shown.length) this.log(c.dim(`... and ${build.missing.length - shown.length} more`));
+      if (noSource.length > shown.length) this.log(c.dim(`... and ${noSource.length - shown.length} more`));
       if (!flags['allow-missing']) {
         this.log(c.dim('Check out the promotion branch (and pull), or use --allow-missing to build the zip without them.'));
         this.log('');
@@ -122,6 +146,7 @@ export default class DeployzipGenerate extends Command {
 
     this.log('');
     this.log(`${c.green('Done.')} ${c.bold(String(totals.inZip))} of ${totals.listed} components in the zip -> ${c.cyan(outputPath)} ${c.dim(`(${(statSync(target).size / 1024).toFixed(1)} KB)`)}`);
+    if (expected.length > 0) this.log(c.dim(`${expected.length} component(s) are not in the zip because their source is not in git (listed above). Managed-package ones must be installed in the target org first.`));
     this.log('');
     this.log(table(headers, [...rows, totalRow], { rightAlign: [1, 2, 3, 4], separatorBefore: [rows.length] }).join('\n'));
     if (totals.inside > 0) {
