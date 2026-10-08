@@ -86,7 +86,13 @@ export default class PackageGenerate extends Command {
     this.log(dim(`Promotion ${files.promotion.name}${status}: ${selection.total} component${selection.total === 1 ? '' : 's'} in the file.`));
     if (!files.ignored) this.log(dim('No "Ignored changes" file on this promotion.'));
     else if (flags['include-ignored']) this.log(dim('Ignored changes were kept (--include-ignored).'));
-    else this.log(dim(`Ignored (left out): ${selection.ignored}`));
+    else {
+      this.log(dim(`Ignored (left out): ${selection.ignored}`));
+      const shown = selection.ignoredComponents.slice(0, 50);
+      const typeWidth = Math.max(0, ...shown.map((i) => i.type.length));
+      for (const i of shown) this.log(yellow(`  ${i.type.padEnd(typeWidth)}  ${i.name}`) + (i.story ? dim(`  (${i.story})`) : ''));
+      if (selection.ignoredComponents.length > shown.length) this.log(dim(`  ... and ${selection.ignoredComponents.length - shown.length} more`));
+    }
 
     if (selection.duplicates > 0) this.log(dim(`Listed more than once, merged: ${selection.duplicates}`));
 

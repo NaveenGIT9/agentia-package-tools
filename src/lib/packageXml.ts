@@ -21,6 +21,8 @@ export interface Selection {
   included: number;
   /** components left out because they are listed in "Ignored changes" */
   ignored: number;
+  /** the same components, so the command can name them */
+  ignoredComponents: Array<{ story: string; type: string; name: string }>;
   /** components left out because of their action, counted per action */
   skippedByAction: Record<string, number>;
   /** components Copado files under category "Other" (for example a QCP script, type "js"): not Salesforce metadata */
@@ -61,6 +63,7 @@ export function selectComponents(changes: Change[], ignored: Change[] | null, ex
   const sets = new Map<string, Set<string>>();
   const skippedByAction: Record<string, number> = {};
   const nonMetadata: string[] = [];
+  const ignoredComponents: Array<{ story: string; type: string; name: string }> = [];
   let total = 0;
   let included = 0;
   let ignoredCount = 0;
@@ -73,6 +76,7 @@ export function selectComponents(changes: Change[], ignored: Change[] | null, ex
     total++;
     if (isIgnored(comp, ignoredKeys)) {
       ignoredCount++;
+      ignoredComponents.push({ story: text(comp.u), type: mdType, name: apiName });
       continue;
     }
     if (text(comp.c).trim().toLowerCase() === 'other') {
@@ -93,7 +97,7 @@ export function selectComponents(changes: Change[], ignored: Change[] | null, ex
 
   const members = new Map<string, string[]>();
   for (const type of [...sets.keys()].sort()) members.set(type, [...sets.get(type)!].sort());
-  return { members, total, included, ignored: ignoredCount, skippedByAction, nonMetadata, duplicates };
+  return { members, total, included, ignored: ignoredCount, ignoredComponents, skippedByAction, nonMetadata, duplicates };
 }
 
 export function escapeXml(s: string): string {

@@ -41,6 +41,10 @@ test('ignored changes: story-specific, story-less, and promotion entries with no
   assert.ok(classes.includes('SharedName'), 'US-2 still has SharedName');
   assert.ok(classes.includes('KeepMe'));
   assert.equal(s.ignored, 2);
+  assert.deepEqual(s.ignoredComponents, [
+    { story: 'US-1', type: 'ApexClass', name: 'OnlyIgnored' },
+    { story: 'US-1', type: 'ApexClass', name: 'SharedName' },
+  ]);
 
   // an ignored entry without a story removes the component for every story
   const noStory = selectComponents(changes, [{ t: 'ApexClass', n: 'SharedName', a: 'Add' }], true);
