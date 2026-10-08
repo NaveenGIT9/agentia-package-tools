@@ -1,0 +1,29 @@
+{
+  "name": "@naveengit9/agentia-package",
+  "version": "0.1.0",
+  "description": "agentia commands: generate package.xml from a Copado promotion and a deployment zip from a package.xml",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=18.0.0" },
+  "files": ["/dist"],
+  "dependencies": {
+    "@oclif/core": "^4",
+    "@salesforce/core": "8.31.0",
+    "@salesforce/source-deploy-retrieve": "^12"
+  },
+  "overrides": {
+    "@jsforce/jsforce-node": "3.10.14"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  },
+  "oclif": {
+    "commands": "./dist/commands",
+    "topicSeparator": " "
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test dist/lib"
+  }
+}
